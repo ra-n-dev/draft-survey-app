@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // users/{uid} — account + subscription/approval status.
+    //
+    // Security model:
+    //  - "admin" is a Firebase Auth CUSTOM CLAIM (request.auth.token.admin),
+    //    never a Firestore field. Only server-side code holding a service
+    //    account key can set it (see scripts/setAdmin.mjs). A user can
+    //    NEVER grant themselves admin by editing their own document.
+    //  - A new user may create their own doc ONLY with role:'user' and
+    //    status:'pending' — they cannot self-approve.
+    //  - Only an admin can change status/role/plan/planAmount afterwards.
+    //  - A regular user may still update their own displayName.
+    // ---------------------------------------------------------------
+    match /users/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || request.auth.token.admin == true);
+      allow list: if request.auth != null && request.auth.token.admin == true;
+
+      allow create: if request.auth != null
+                     && request.auth.uid == uid
+                     && request.resource.data.role == 'user'
+                     && request.resource.data.status == 'pending';
+
+      allow update: if request.auth != null && (
+                       request.auth.token.admin == true ||
+                       (request.auth.uid == uid &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+                     );
+
+      allow delete: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // ---------------------------------------------------------------
+    // users/{uid}/surveys/{surveyId} — the actual draft survey data.
+    // Only the owner can access their own surveys, AND only while their
+    // account status is 'approved' (or they hold the admin claim). A
+    // suspended/terminated/pending account is locked out immediately —
+    // this is enforced server-side, not just hidden in the UI.
+    // ---------------------------------------------------------------
+    match /users/{userId}/surveys/{surveyId} {
+      allow read, write: if request.auth != null
+                           && request.auth.uid == userId
+                           && (
+                                request.auth.token.admin == true ||
+                                get(/databases/$(database)/documents/users/$(userId)).data.status == 'approved'
+                              );
+    }
+
+    // ---------------------------------------------------------------
+    // payments/{paymentId} — a simple ledger of money actually received.
+    // Admin-only in both directions: this is financial record-keeping, not
+    // user-facing data, and a regular user has no reason to read or write it.
+    // ---------------------------------------------------------------
+    match /payments/{paymentId} {
+      allow read, list: if request.auth != null && request.auth.token.admin == true;
+      allow create: if request.auth != null && request.auth.token.admin == true;
+      allow delete: if request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Deny everything else by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
