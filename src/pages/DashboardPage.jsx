@@ -21,7 +21,7 @@ function firstNameOf(user, profile) {
 }
 
 export default function DashboardPage() {
-  const { surveys, isOnline, removeSurvey, upsertSurvey, vesselProfile } = useSurveys();
+  const { surveys, isOnline, removeSurvey, upsertSurvey, vesselProfile, settings, updateSettings } = useSurveys();
   const { user, firebaseEnabled, logout } = useAuth();
   const { profile, isAdmin } = useProfile();
   const nav = useNavigate();
@@ -78,6 +78,9 @@ export default function DashboardPage() {
   };
 
   const displayName = firstNameOf(user, profile);
+  const formMode = settings.formMode ?? "wizard";
+  const toggleFormMode = () =>
+    updateSettings({ ...settings, formMode: formMode === "wizard" ? "unfolded" : "wizard" });
 
   return (
     <div className="page dashboard-shell">
@@ -98,6 +101,9 @@ export default function DashboardPage() {
           </div>
         </div>
         <nav className="header-actions">
+          <button className="btn btn-ghost-invert" onClick={toggleFormMode}>
+            {formMode === "wizard" ? "☰ Switch to All-in-one view" : "▤ Switch to Step-by-step view"}
+          </button>
           <Link to="/settings" className="btn btn-ghost-invert">
             Settings
           </Link>

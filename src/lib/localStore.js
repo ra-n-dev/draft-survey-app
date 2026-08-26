@@ -51,6 +51,10 @@ export async function getSettings(uid) {
     (await get(settingsKey(uid))) || {
       decimals: 3,
       standardDensity: 1.025,
+      // 'wizard' = Google-Forms-style one-section-at-a-time with Back/Next.
+      // 'unfolded' = every section stacked on one scrollable page (the
+      // original layout). Toggled from the Dashboard.
+      formMode: "wizard",
     }
   );
 }

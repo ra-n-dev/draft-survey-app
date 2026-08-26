@@ -72,5 +72,18 @@ export function newSurvey(type = "initial") {
 }
 
 export function newTank(name = "") {
-  return { id: nanoid(), name, volume: null, density: null };
+  return {
+    id: nanoid(),
+    name,
+    // Sounding/ullage reading actually measured in this tank.
+    soundingD2: null,
+    // The tank's own sounding/calibration table: two bracketing rows used
+    // to interpolate the true volume at soundingD2, the same way QM1/QM3
+    // bracket the hydrostatic table for Displacement/TPC/LCF.
+    d1: null,
+    vol1: null,
+    d3: null,
+    vol3: null,
+    density: null,
+  };
 }

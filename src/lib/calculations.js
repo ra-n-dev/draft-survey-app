@@ -179,19 +179,66 @@ export function computeSurvey(d, dp = 3) {
   // ---------- 13. Deductibles / consumables ----------
   const ded = d.deductibles || {};
 
+  // Each ballast/fresh-water tank is now read the same way as the
+  // Displacement/TPC/LCF hydrostatic lookups: you take a sounding/ullage
+  // reading (D2) in the tank, and the tank's own sounding/calibration
+  // table gives two bracketing rows - a lower sounding D1 with volume
+  // Vol1, and an upper sounding D3 with volume Vol3. The true volume is
+  // interpolated between them, then multiplied by density for the tank's
+  // weight. Tanks are still summed together for the deductible total.
+  //
+  // Backward compatibility: a tank saved before this feature existed may
+  // only have a plain `volume` figure with no sounding/table fields at
+  // all - that is honored directly (volume x density) rather than forcing
+  // re-entry of old data.
   const sumTanks = (tanks, pathPrefix, label) => {
     if (!tanks || tanks.length === 0) return 0;
     let total = 0;
-    let any = false;
+
     tanks.forEach((t, i) => {
-      if (isNum(t.volume) && isNum(t.density)) {
-        total += t.volume * t.density;
-        any = true;
-      } else if (t.volume !== undefined || t.density !== undefined) {
-        missing.push({ path: `${pathPrefix}[${i}]`, label: `${label} #${i + 1} volume/density` });
+      const hasLegacyVolumeOnly =
+        isNum(t.volume) && !isNum(t.soundingD2) && !isNum(t.d1) && !isNum(t.d3);
+
+      if (hasLegacyVolumeOnly) {
+        if (isNum(t.density)) {
+          total += t.volume * t.density;
+        } else {
+          missing.push({ path: `${pathPrefix}[${i}].density`, label: `${label} #${i + 1} density` });
+        }
+        return;
+      }
+
+      const hasAnyInput =
+        isNum(t.soundingD2) ||
+        isNum(t.d1) ||
+        isNum(t.vol1) ||
+        isNum(t.d3) ||
+        isNum(t.vol3) ||
+        isNum(t.density) ||
+        isNum(t.volume);
+
+      const allFilled =
+        isNum(t.soundingD2) &&
+        isNum(t.d1) &&
+        isNum(t.vol1) &&
+        isNum(t.d3) &&
+        isNum(t.vol3) &&
+        isNum(t.density);
+
+      if (allFilled) {
+        const interpolatedVolume = interpolate(t.d1, t.soundingD2, t.d3, t.vol1, t.vol3);
+        if (isNum(interpolatedVolume)) {
+          total += interpolatedVolume * t.density;
+        }
+      } else if (hasAnyInput) {
+        missing.push({
+          path: `${pathPrefix}[${i}]`,
+          label: `${label} #${i + 1}: sounding (D2), table brackets (D1/Vol1, D3/Vol3) & density`,
+        });
       }
     });
-    return any || tanks.length === 0 ? total : total;
+
+    return total;
   };
 
   const ballastTotal =
