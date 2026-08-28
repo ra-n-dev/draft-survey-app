@@ -601,3 +601,42 @@ input[type="text"], input[type="email"], input[type="password"], input:not([type
   margin: 0.8rem 0;
   font-size: 0.85rem;
 }
+
+/* ---------- Draft mark photo capture ---------- */
+.draft-photo-capture { margin-top: 0.3rem; }
+.draft-photo-card {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+.draft-photo-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.draft-photo-body { flex: 1; min-width: 0; }
+.draft-photo-value {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--navy-dark);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.draft-photo-confidence {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--success);
+  background: #e3f6e8;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+}
+.draft-photo-warning { color: var(--warning); margin: 0.3rem 0; }
+.draft-photo-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }

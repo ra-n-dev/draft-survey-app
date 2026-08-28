@@ -5,6 +5,7 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
 } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 // ---------------------------------------------------------------------------
 // PUT YOUR OWN FIREBASE PROJECT CONFIG HERE.
@@ -25,7 +26,7 @@ const firebaseConfig = {
 
 export const firebaseEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
-let app, auth, db;
+let app, auth, db, functions;
 
 if (firebaseEnabled) {
   app = initializeApp(firebaseConfig);
@@ -40,6 +41,11 @@ if (firebaseEnabled) {
       tabManager: persistentMultipleTabManager(),
     }),
   });
+
+  // Used by src/lib/draftVision.js to call the readDraftPhoto Cloud
+  // Function - this is what keeps the Gemini API key server-side instead
+  // of exposed in the browser bundle. See functions/index.js.
+  functions = getFunctions(app);
 } else {
   // No Firebase config supplied - app still works 100% offline using
   // IndexedDB (see localStore.js). Auth/sync screens will show a notice.
@@ -49,4 +55,4 @@ if (firebaseEnabled) {
   );
 }
 
-export { app, auth, db };
+export { app, auth, db, functions };

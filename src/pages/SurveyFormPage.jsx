@@ -9,6 +9,7 @@ import NumberField from "../components/NumberField.jsx";
 import ResultRow from "../components/ResultRow.jsx";
 import MissingFieldsBanner from "../components/MissingFieldsBanner.jsx";
 import TankEditor from "../components/TankEditor.jsx";
+import DraftPhotoCapture from "../components/DraftPhotoCapture.jsx";
 
 export default function SurveyFormPage() {
   const { id } = useParams();
@@ -185,12 +186,30 @@ export default function SurveyFormPage() {
       content: (
         <>
           <div className="grid-2">
-            <NumberField label="Fwd Draft — Port" decimals={dp} value={survey.drafts.fwdPort} onChange={(x) => patch("drafts.fwdPort", x)} required />
-            <NumberField label="Fwd Draft — Stbd" decimals={dp} value={survey.drafts.fwdStbd} onChange={(x) => patch("drafts.fwdStbd", x)} required />
-            <NumberField label="Midship Draft — Port" decimals={dp} value={survey.drafts.midPort} onChange={(x) => patch("drafts.midPort", x)} required />
-            <NumberField label="Midship Draft — Stbd" decimals={dp} value={survey.drafts.midStbd} onChange={(x) => patch("drafts.midStbd", x)} required />
-            <NumberField label="Aft Draft — Port" decimals={dp} value={survey.drafts.aftPort} onChange={(x) => patch("drafts.aftPort", x)} required />
-            <NumberField label="Aft Draft — Stbd" decimals={dp} value={survey.drafts.aftStbd} onChange={(x) => patch("drafts.aftStbd", x)} required />
+            <div>
+              <NumberField label="Fwd Draft — Port" decimals={dp} value={survey.drafts.fwdPort} onChange={(x) => patch("drafts.fwdPort", x)} required />
+              <DraftPhotoCapture label="Fwd Port" onAccept={(x) => patch("drafts.fwdPort", x)} />
+            </div>
+            <div>
+              <NumberField label="Fwd Draft — Stbd" decimals={dp} value={survey.drafts.fwdStbd} onChange={(x) => patch("drafts.fwdStbd", x)} required />
+              <DraftPhotoCapture label="Fwd Stbd" onAccept={(x) => patch("drafts.fwdStbd", x)} />
+            </div>
+            <div>
+              <NumberField label="Midship Draft — Port" decimals={dp} value={survey.drafts.midPort} onChange={(x) => patch("drafts.midPort", x)} required />
+              <DraftPhotoCapture label="Midship Port" onAccept={(x) => patch("drafts.midPort", x)} />
+            </div>
+            <div>
+              <NumberField label="Midship Draft — Stbd" decimals={dp} value={survey.drafts.midStbd} onChange={(x) => patch("drafts.midStbd", x)} required />
+              <DraftPhotoCapture label="Midship Stbd" onAccept={(x) => patch("drafts.midStbd", x)} />
+            </div>
+            <div>
+              <NumberField label="Aft Draft — Port" decimals={dp} value={survey.drafts.aftPort} onChange={(x) => patch("drafts.aftPort", x)} required />
+              <DraftPhotoCapture label="Aft Port" onAccept={(x) => patch("drafts.aftPort", x)} />
+            </div>
+            <div>
+              <NumberField label="Aft Draft — Stbd" decimals={dp} value={survey.drafts.aftStbd} onChange={(x) => patch("drafts.aftStbd", x)} required />
+              <DraftPhotoCapture label="Aft Stbd" onAccept={(x) => patch("drafts.aftStbd", x)} />
+            </div>
           </div>
           <div className="results-block">
             <ResultRow label="Fwd Mean Draft" value={v.fwdMean} decimals={dp} />
