@@ -3,7 +3,8 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { useSurveys } from "../context/SurveyContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { getSurveyLocal } from "../lib/localStore.js";
-import { computeInitial, computeFinal } from "../lib/calculations.js";
+import { computeInitial, computeFinal, round } from "../lib/calculations.js";
+import { newCargoHold } from "../lib/surveyModel.js";
 import Section from "../components/Section.jsx";
 import NumberField from "../components/NumberField.jsx";
 import ResultRow from "../components/ResultRow.jsx";
@@ -71,16 +72,29 @@ export default function SurveyFormPage() {
 
   const result = useMemo(() => {
     if (!survey) return null;
-    if (survey.type === "initial") {
+    // The vessel's actual CONDITION for this survey decides which
+    // calculation runs - not which survey (first/second) it happens to
+    // be. In the common loading scenario the two line up (initial=empty,
+    // final=loaded); in a discharging scenario they're reversed (the
+    // first survey done is loaded, the second is empty).
+    const condition = survey.condition ?? (survey.type === "initial" ? "empty" : "loaded");
+    if (condition === "empty") {
       return computeInitial(survey, survey.lightship, dp);
     }
-    const initialNet = linkedInitial?.__netDisplacementCache ?? linkedInitial?.netDisplacementSnapshot;
+    const initialNet = linkedInitial?.netDisplacementSnapshot;
     return computeFinal(survey, survey.lightship, survey.constant, initialNet, dp);
   }, [survey, dp, linkedInitial]);
 
   if (!survey) return <div className="page">Loading…</div>;
   const v = result.values;
   const missing = result.missing;
+  const condition = survey.condition ?? (survey.type === "initial" ? "empty" : "loaded");
+  // Which direction is this voyage going? Determined by whichever survey
+  // was done FIRST (type === "initial"), regardless of which one we're
+  // looking at right now - a Final survey looks at its own linkedInitial
+  // to find out.
+  const firstSurveyCondition = survey.type === "initial" ? condition : linkedInitial?.condition ?? "empty";
+  const isDischarging = firstSurveyCondition === "loaded";
 
   const missingIn = (prefixes) => missing.filter((m) => prefixes.some((p) => m.path.startsWith(p)));
 
@@ -90,6 +104,15 @@ export default function SurveyFormPage() {
       status: "complete",
       netDisplacementSnapshot: v.netDisplacement,
     };
+    // Save the RESOLVED Constant (manual entry if provided, otherwise the
+    // calculated figure) so a linked "loaded"-condition survey always
+    // inherits the correct number regardless of which path produced it -
+    // see DashboardPage.startNew, which reads constantSnapshot in
+    // preference to the raw (override-only) `constant` field. Only an
+    // "empty"-condition survey produces an authoritative Constant this way.
+    if (condition === "empty") {
+      updated.constantSnapshot = v.constant;
+    }
     await upsertSurvey(updated);
     await updateVesselProfile({
       vesselName: survey.vesselName,
@@ -98,6 +121,12 @@ export default function SurveyFormPage() {
       dFwd: survey.vessel.dFwd,
       dAft: survey.vessel.dAft,
       dMid: survey.vessel.dMid,
+      imoNumber: survey.vessel.imoNumber,
+      callSign: survey.vessel.callSign,
+      flag: survey.vessel.flag,
+      grt: survey.vessel.grt,
+      nrt: survey.vessel.nrt,
+      dwt: survey.vessel.dwt,
       lightship: survey.lightship,
     });
     nav(`/report/${survey.id}`);
@@ -130,6 +159,22 @@ export default function SurveyFormPage() {
               <span className="field-label">Port</span>
               <input value={survey.port} onChange={(e) => patch("port", e.target.value)} />
             </label>
+            <label className="field">
+              <span className="field-label">Commodity</span>
+              <input
+                value={survey.commodity || ""}
+                onChange={(e) => patch("commodity", e.target.value)}
+                placeholder="e.g. Bagged Cement"
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">This survey's start time</span>
+              <input type="time" value={survey.startTime || ""} onChange={(e) => patch("startTime", e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field-label">This survey's end time</span>
+              <input type="time" value={survey.endTime || ""} onChange={(e) => patch("endTime", e.target.value)} />
+            </label>
           </div>
 
           {survey.type === "final" && (
@@ -147,6 +192,29 @@ export default function SurveyFormPage() {
               )}
             </div>
           )}
+
+          <h3 className="step-subheading">Vessel Condition</h3>
+          <p className="muted small" style={{ marginTop: "-0.4rem" }}>
+            Loading (arrive empty, depart loaded): Initial = Empty, Final = Loaded — the usual case.
+            Discharging (arrive loaded, depart empty): Initial = Loaded, Final = Empty. This decides which
+            calculation runs, regardless of which survey this happens to be.
+          </p>
+          <div className="condition-toggle">
+            <button
+              type="button"
+              className={`condition-btn ${condition === "empty" ? "active" : ""}`}
+              onClick={() => patch("condition", "empty")}
+            >
+              Empty (light / ballast)
+            </button>
+            <button
+              type="button"
+              className={`condition-btn ${condition === "loaded" ? "active" : ""}`}
+              onClick={() => patch("condition", "loaded")}
+            >
+              Loaded (with cargo)
+            </button>
+          </div>
 
           <h3 className="step-subheading">Client & Personnel</h3>
           <div className="grid-2">
@@ -171,10 +239,50 @@ export default function SurveyFormPage() {
               <input value={survey.surveyorContact || ""} onChange={(e) => patch("surveyorContact", e.target.value)} />
             </label>
           </div>
+          <label className="field" style={{ marginTop: "0.6rem" }}>
+            <span className="field-label">Client / receiving company logo (optional)</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => patch("clientLogoDataUrl", reader.result);
+                reader.readAsDataURL(file);
+              }}
+            />
+          </label>
+          {survey.clientLogoDataUrl && (
+            <img src={survey.clientLogoDataUrl} alt="Client logo" style={{ height: 48, marginTop: "0.4rem" }} />
+          )}
           <p className="muted small">
             Surveyor name/contact default from your Settings profile but can be changed for this
             survey specifically.
           </p>
+
+          <h3 className="step-subheading">Certificate Particulars</h3>
+          <p className="muted small" style={{ marginTop: "-0.4rem" }}>
+            From the vessel's Certificate of Registry / Tonnage Certificate — fixed ship details,
+            not calculated. Entered once and carried forward automatically.
+          </p>
+          <div className="grid-2">
+            <label className="field">
+              <span className="field-label">IMO Number</span>
+              <input value={survey.vessel.imoNumber || ""} onChange={(e) => patch("vessel.imoNumber", e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field-label">Call Sign</span>
+              <input value={survey.vessel.callSign || ""} onChange={(e) => patch("vessel.callSign", e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field-label">Flag</span>
+              <input value={survey.vessel.flag || ""} onChange={(e) => patch("vessel.flag", e.target.value)} />
+            </label>
+            <NumberField label="GRT" decimals={0} value={survey.vessel.grt} onChange={(x) => patch("vessel.grt", x)} allowNegative={false} />
+            <NumberField label="NRT" decimals={0} value={survey.vessel.nrt} onChange={(x) => patch("vessel.nrt", x)} allowNegative={false} />
+            <NumberField label="DWT" decimals={0} value={survey.vessel.dwt} onChange={(x) => patch("vessel.dwt", x)} suffix="t" allowNegative={false} />
+          </div>
         </>
       ),
     },
@@ -185,6 +293,22 @@ export default function SurveyFormPage() {
       missing: missingIn(["drafts."]),
       content: (
         <>
+          <p className="muted small">Conditions at the time of reading — your own observation, affects reading accuracy.</p>
+          <div className="grid-2" style={{ marginBottom: "1rem" }}>
+            <label className="field">
+              <span className="field-label">Sea state</span>
+              <input value={survey.seaState || ""} onChange={(e) => patch("seaState", e.target.value)} placeholder="e.g. Calm / Slight" />
+            </label>
+            <label className="field">
+              <span className="field-label">Wind</span>
+              <input value={survey.windState || ""} onChange={(e) => patch("windState", e.target.value)} placeholder="e.g. Lt. Airs" />
+            </label>
+            <NumberField label="Temperature (°C)" decimals={0} value={survey.temperature} onChange={(x) => patch("temperature", x)} />
+            <label className="field">
+              <span className="field-label">Reading accuracy</span>
+              <input value={survey.readingAccuracy || ""} onChange={(e) => patch("readingAccuracy", e.target.value)} placeholder="e.g. +/- 1cm" />
+            </label>
+          </div>
           <div className="grid-2">
             <div>
               <NumberField label="Fwd Draft — Port" decimals={dp} value={survey.drafts.fwdPort} onChange={(x) => patch("drafts.fwdPort", x)} required />
@@ -408,41 +532,193 @@ export default function SurveyFormPage() {
         </>
       ),
     },
-    survey.type === "initial"
+    condition === "loaded"
+      ? {
+          key: "holds",
+          title: "8. Cargo Hold Breakdown",
+          subtitle: "Optional — quantity per hold, for the report only (doesn't affect calculations)",
+          missing: [],
+          content: (
+            <>
+              {(survey.deductibles ? survey.cargoHolds || [] : survey.cargoHolds || []).map((h, idx) => (
+                <div className="grid-2" key={h.id} style={{ marginBottom: "0.5rem" }}>
+                  <label className="field">
+                    <span className="field-label">Hold name</span>
+                    <input
+                      value={h.name}
+                      onChange={(e) => {
+                        const next = [...survey.cargoHolds];
+                        next[idx] = { ...next[idx], name: e.target.value };
+                        patch("cargoHolds", next);
+                      }}
+                    />
+                  </label>
+                  <NumberField
+                    label="Quantity"
+                    decimals={dp}
+                    value={h.quantity}
+                    onChange={(x) => {
+                      const next = [...survey.cargoHolds];
+                      next[idx] = { ...next[idx], quantity: x };
+                      patch("cargoHolds", next);
+                    }}
+                    suffix="t"
+                    allowNegative={false}
+                  />
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.4rem" }}>
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => patch("cargoHolds", [...(survey.cargoHolds || []), newCargoHold(`Hold ${(survey.cargoHolds || []).length + 1}`)])}
+                >
+                  + Add hold
+                </button>
+                {(survey.cargoHolds || []).length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-link danger"
+                    onClick={() => patch("cargoHolds", survey.cargoHolds.slice(0, -1))}
+                  >
+                    Remove last
+                  </button>
+                )}
+              </div>
+              {(survey.cargoHolds || []).length > 0 && (
+                <div className="results-block">
+                  <ResultRow
+                    label="Holds total"
+                    value={round((survey.cargoHolds || []).reduce((sum, h) => sum + (h.quantity || 0), 0), dp)}
+                    decimals={dp}
+                    unit="t"
+                    highlight
+                  />
+                </div>
+              )}
+            </>
+          ),
+        }
+      : null,
+    condition === "empty"
       ? {
           key: "result",
-          title: "8. Light Ship & Constant",
+          title: "9. Light Ship & Constant",
           subtitle: null,
           missing: missingIn(["lightship", "constant"]),
           content: (
             <>
               <NumberField label="Light Ship weight" decimals={dp} value={survey.lightship} onChange={(x) => patch("lightship", x)} suffix="t" required />
               <div className="results-block">
-                <ResultRow label="Constant (Net Disp − Light Ship)" value={v.constant} decimals={dp} unit="t" highlight />
+                <ResultRow label="Calculated Constant (Net Disp − Light Ship)" value={v.calculatedConstant} decimals={dp} unit="t" />
               </div>
+              <NumberField
+                label="Constant (optional — enter if known, e.g. from a Certificate of Constant)"
+                decimals={dp}
+                value={survey.constant}
+                onChange={(x) => patch("constant", x)}
+                suffix="t"
+                hint="Leave blank to use the calculated value above. Entering a figure here overrides it everywhere downstream."
+              />
+              {survey.constant != null && v.calculatedConstant != null && (
+                <div className="results-block">
+                  <ResultRow
+                    label="Difference (entered − calculated)"
+                    value={round(survey.constant - v.calculatedConstant, dp)}
+                    decimals={dp}
+                    unit="t"
+                  />
+                </div>
+              )}
+              <div className="results-block">
+                <ResultRow label="Constant used (a linked Loaded survey will inherit this)" value={v.constant} decimals={dp} unit="t" highlight />
+              </div>
+
+              {isDischarging && (
+                <>
+                  <div className="results-block">
+                    <ResultRow label="Cargo + Constant" value={v.constant} decimals={dp} unit="t" />
+                    <ResultRow label="Cargo on Board" value={0} decimals={dp} unit="t" highlight />
+                  </div>
+                  {(survey.cargoHolds || []).length > 0 && (
+                    <div className="results-block">
+                      <ResultRow
+                        label="Cargo Discharged (sum of holds, from the Cargo Hold Breakdown step)"
+                        value={round((survey.cargoHolds || []).reduce((sum, h) => sum + (h.quantity || 0), 0), dp)}
+                        decimals={dp}
+                        unit="t"
+                      />
+                    </div>
+                  )}
+                  <NumberField
+                    label="Cargo Discharged — manual override (optional)"
+                    decimals={dp}
+                    value={survey.cargoTally}
+                    onChange={(x) => patch("cargoTally", x)}
+                    suffix="t"
+                    hint={
+                      (survey.cargoHolds || []).length > 0
+                        ? "Leave blank to use the hold total above (the standard, most rigorous method). Only fill this in if you have one overall tally figure instead of a hold-by-hold breakdown."
+                        : "No holds entered on this survey — enter the receiver's overall tally figure here directly, or go back and use the Cargo Hold Breakdown step instead."
+                    }
+                  />
+                </>
+              )}
             </>
           ),
         }
       : {
           key: "result",
-          title: "8. Cargo Result",
+          title: "9. Cargo Result",
           subtitle: null,
           missing: missingIn(["lightship", "constant"]),
           content: (
             <>
               <div className="grid-2">
-                <NumberField label="Light Ship (from Initial survey)" decimals={dp} value={survey.lightship} onChange={(x) => patch("lightship", x)} suffix="t" required />
-                <NumberField label="Constant (from Initial survey)" decimals={dp} value={survey.constant} onChange={(x) => patch("constant", x)} suffix="t" required />
+                <NumberField label="Light Ship" decimals={dp} value={survey.lightship} onChange={(x) => patch("lightship", x)} suffix="t" required />
+                <NumberField
+                  label="Constant"
+                  decimals={dp}
+                  value={survey.constant}
+                  onChange={(x) => patch("constant", x)}
+                  suffix="t"
+                  required
+                  hint={
+                    linkedInitial
+                      ? "Pre-filled from the linked survey — edit if you need to override it."
+                      : "Enter the vessel's known Constant (e.g. from a Certificate of Constant)."
+                  }
+                />
               </div>
-              <div className="results-block">
-                <ResultRow label="Cargo + Constant" value={v.cargoPlusConstant} decimals={dp} unit="t" />
-                <ResultRow label="Cargo on Board" value={v.cargoOnBoard} decimals={dp} unit="t" highlight />
-                <ResultRow label="Cargo Loaded (vs. Initial)" value={v.cargoLoaded} decimals={dp} unit="t" highlight />
-              </div>
+              {v.cargoOnBoard != null && v.cargoOnBoard >= 0 && (
+                <div className="results-block">
+                  <ResultRow label="Cargo + Constant" value={v.cargoPlusConstant} decimals={dp} unit="t" />
+                  <ResultRow label="Cargo on Board" value={v.cargoOnBoard} decimals={dp} unit="t" highlight />
+                  {!isDischarging && (
+                    <ResultRow label="Cargo Loaded (vs. linked survey)" value={v.cargoLoaded} decimals={dp} unit="t" highlight />
+                  )}
+                </div>
+              )}
+              {v.cargoOnBoard != null && v.cargoOnBoard < 0 && (
+                <p className="muted small" style={{ marginTop: "0.6rem" }}>
+                  Cargo on Board came out negative with the current Light Ship/Constant figures, so it
+                  isn't shown here — double-check those two values above.
+                </p>
+              )}
+              {isDischarging && (
+                <NumberField
+                  label="Cargo Manifested — Declared by Chief Officer"
+                  decimals={dp}
+                  value={survey.cargoManifested}
+                  onChange={(x) => patch("cargoManifested", x)}
+                  suffix="t"
+                  hint="From the Bill of Lading / mate's receipt — compared against the receiver's Tally figure on the report."
+                />
+              )}
             </>
           ),
         },
-  ];
+  ].filter(Boolean);
 
   const totalSteps = steps.length;
   const safeIndex = Math.min(stepIndex, totalSteps - 1);

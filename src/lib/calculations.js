@@ -179,7 +179,7 @@ export function computeSurvey(d, dp = 3) {
   // ---------- 13. Deductibles / consumables ----------
   const ded = d.deductibles || {};
 
-  // Each ballast/fresh-water tank is now read the same way as the
+  // Each ballast/fresh-water tank is read the same way as the
   // Displacement/TPC/LCF hydrostatic lookups: you take a sounding/ullage
   // reading (D2) in the tank, and the tank's own sounding/calibration
   // table gives two bracketing rows - a lower sounding D1 with volume
@@ -288,17 +288,35 @@ export function computeSurvey(d, dp = 3) {
 /**
  * Combines an Initial (empty/light) survey with a Light Ship figure to
  * derive the vessel Constant.
+ *
+ * A surveyor can now ALSO enter a known Constant directly (e.g. from a
+ * Certificate of Constant) instead of relying purely on the calculated
+ * figure. `values.calculatedConstant` always holds the auto-calculated
+ * reference value (Net Displacement - Light Ship); `values.constant` is
+ * the EFFECTIVE value used everywhere downstream (the linked Final
+ * survey's cargo figures, the report) - it's the manually-entered figure
+ * when one was provided, otherwise it falls back to the calculated one.
  */
 export function computeInitial(surveyData, lightship, dp = 3) {
   const { values, missing } = computeSurvey(surveyData, dp);
   if (!isNum(lightship)) {
     missing.push({ path: "lightship", label: "Light Ship weight" });
   }
-  const constant = isNum(values.netDisplacement) && isNum(lightship)
-    ? values.netDisplacement - lightship
-    : null;
+  const calculatedConstant =
+    isNum(values.netDisplacement) && isNum(lightship)
+      ? values.netDisplacement - lightship
+      : null;
+
+  const enteredConstant = surveyData.constant;
+  const constant = isNum(enteredConstant) ? enteredConstant : calculatedConstant;
+
   return {
-    values: { ...values, lightship: isNum(lightship) ? round(lightship, dp) : null, constant: round(constant, dp) },
+    values: {
+      ...values,
+      lightship: isNum(lightship) ? round(lightship, dp) : null,
+      calculatedConstant: round(calculatedConstant, dp),
+      constant: round(constant, dp),
+    },
     missing,
   };
 }

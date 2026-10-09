@@ -64,8 +64,9 @@ export async function saveSettings(uid, settings) {
   return settings;
 }
 
-// Vessel profile: reusable ship particulars (name, LBM, LBP, distances) so
-// the user doesn't have to re-type them for every survey.
+// Vessel profile: reusable ship particulars (name, LBM, LBP, distances,
+// certificate/registry info) so the user doesn't have to re-type them for
+// every survey.
 export async function getVesselProfile(uid) {
   return (
     (await get(vesselProfileKey(uid))) || {
@@ -75,6 +76,12 @@ export async function getVesselProfile(uid) {
       dFwd: null,
       dAft: null,
       dMid: 0,
+      imoNumber: "",
+      callSign: "",
+      flag: "",
+      grt: null,
+      nrt: null,
+      dwt: null,
       lightship: null,
     }
   );
@@ -114,5 +121,26 @@ export async function getSurveyorProfile(uid) {
 
 export async function saveSurveyorProfile(uid, profile) {
   await set(surveyorProfileKey(uid), profile);
+  return profile;
+}
+
+// Default receiving/client company (e.g. "Dzata Cement") - pre-fills a new
+// Initial survey's Client fields, same convenience pattern as the vessel
+// profile. Still fully editable per survey since you may work with
+// different clients.
+const clientProfileKey = (uid) => `${scope(uid)}::clientProfile`;
+
+export async function getClientProfile(uid) {
+  return (
+    (await get(clientProfileKey(uid))) || {
+      name: "",
+      contact: "",
+      logoDataUrl: null,
+    }
+  );
+}
+
+export async function saveClientProfile(uid, profile) {
+  await set(clientProfileKey(uid), profile);
   return profile;
 }

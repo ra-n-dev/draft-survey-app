@@ -49,6 +49,12 @@ export default function DashboardPage() {
           dFwd: vesselProfile.dFwd,
           dAft: vesselProfile.dAft,
           dMid: vesselProfile.dMid ?? 0,
+          imoNumber: vesselProfile.imoNumber || "",
+          callSign: vesselProfile.callSign || "",
+          flag: vesselProfile.flag || "",
+          grt: vesselProfile.grt ?? null,
+          nrt: vesselProfile.nrt ?? null,
+          dwt: vesselProfile.dwt ?? null,
         };
         if (vesselProfile.lightship != null) s.lightship = vesselProfile.lightship;
       }
@@ -60,16 +66,29 @@ export default function DashboardPage() {
       const initials = surveys.filter((sv) => sv.type === "initial" && sv.status === "complete");
       if (initials.length) {
         const linked = initials[0];
+        const linkedCondition = linked.condition ?? "empty";
         s.linkedInitialId = linked.id;
-        s.lightship = linked.lightship;
-        s.constant = linked.constant;
+        s.lightship = linked.lightship; // fixed ship particular either way
+        if (linkedCondition === "empty") {
+          // Normal LOADING scenario: the linked survey was Empty, so its
+          // resolved Constant is authoritative — carry it forward.
+          s.constant = linked.constantSnapshot ?? linked.constant;
+        }
+        // else: the linked survey was itself Loaded (a DISCHARGING
+        // scenario — vessel arrived already carrying cargo). It has no
+        // authoritative Constant to hand down. Leave s.constant blank;
+        // this new survey will default to condition "empty" below, so its
+        // own Calculated Constant step derives one from scratch.
+        s.condition = linkedCondition === "empty" ? "loaded" : "empty";
         s.vesselName = linked.vesselName;
         s.voyageNo = linked.voyageNo;
         s.port = linked.port;
         s.vessel = { ...linked.vessel };
         s.clientCompany = linked.clientCompany;
         s.clientContact = linked.clientContact;
+        s.clientLogoDataUrl = linked.clientLogoDataUrl;
         s.chiefOfficerName = linked.chiefOfficerName;
+        s.commodity = linked.commodity;
       }
     }
 
