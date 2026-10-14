@@ -144,24 +144,53 @@ export default function ReportPage() {
     );
 
   // ---------- cargo figures ----------
-  const cargoHoldsSurvey = [initialSurvey, finalSurvey].find((s) => s && (s.cargoHolds || []).length > 0);
-  const cargoHolds = cargoHoldsSurvey?.cargoHolds || [];
+  // The hold-by-hold MANIFEST breakdown belongs to whichever survey is
+  // the LOADED one - the Chief Officer declares it when cargo goes on.
+  // In a discharging voyage that's the Initial survey; in a loading
+  // voyage it's the Final survey. This is NOT the same thing as the
+  // discharge tally, so it must never be sourced from the empty side.
+  const manifestHoldsSurvey = isDischarging ? initialSurvey : finalSurvey;
+  const cargoHolds = manifestHoldsSurvey?.cargoHolds || [];
   const cargoHoldsTotal =
     cargoHolds.length > 0 ? round(cargoHolds.reduce((sum, h) => sum + (h.quantity || 0), 0), dp) : null;
+  const manifested = manifestHoldsSurvey?.cargoManifested ?? cargoHoldsTotal;
 
-  // Tally = sum of holds unless a manual overall tally overrides it.
-  const manualTally = [initialSurvey, finalSurvey].map((s) => s?.cargoTally).find((v) => v != null);
-  const tally = manualTally ?? cargoHoldsTotal;
-  const manifested = [initialSurvey, finalSurvey].map((s) => s?.cargoManifested).find((v) => v != null);
+  // Tally (Disch.) only exists once the EMPTY/Final survey of a
+  // discharging voyage has actually been recorded - it's the receiver's
+  // own hold-by-hold tally taken at discharge, entered on THAT survey.
+  // Before the Final survey exists there is no tally yet, by definition.
+  const tallyHolds = isDischarging ? finalSurvey?.cargoHolds || [] : [];
+  const tallyHoldsTotal =
+    tallyHolds.length > 0 ? round(tallyHolds.reduce((sum, h) => sum + (h.quantity || 0), 0), dp) : null;
+  const manualTally = isDischarging ? finalSurvey?.cargoTally : null;
+  const tally = isDischarging ? manualTally ?? tallyHoldsTotal : null;
 
   // Survey (Cargo on Board) vs Tally. Positive = Excess, negative = Shortage.
   const cargoOnBoardComputed = iv?.cargoOnBoard;
+  // Before discharge: show only what's on board (no tally exists yet).
+  const showCargoOnBoardOnly = isDischarging && !finalSurvey && cargoOnBoardComputed != null;
+  // After discharge: the full comparison, now that a tally actually exists.
   const showCargoComparison =
-    isDischarging && (cargoOnBoardComputed != null || tally != null || manifested != null);
+    isDischarging && !!finalSurvey && (cargoOnBoardComputed != null || tally != null);
   const cargoDiff =
     cargoOnBoardComputed != null && tally != null ? round(cargoOnBoardComputed - tally, dp) : null;
 
+  // Before discharge: Draft Survey (what's physically on board) vs
+  // Manifest (what was declared at loading). Catches a discrepancy early,
+  // even before the Final/discharge survey and its Tally exist.
+  const onBoardDiff =
+    showCargoOnBoardOnly && cargoOnBoardComputed != null && manifested != null
+      ? round(cargoOnBoardComputed - manifested, dp)
+      : null;
+
   const showLoadingResult = !isDischarging && fv && (fv.cargoOnBoard != null || fv.cargoLoaded != null);
+  // Loading side: compare what was actually loaded (survey-computed)
+  // against what the Chief Officer declared (Manifest) - same
+  // bigger-one-wins Excess/Shortage logic as the discharge comparison.
+  const loadingDiff =
+    showLoadingResult && fv?.cargoLoaded != null && manifested != null
+      ? round(fv.cargoLoaded - manifested, dp)
+      : null;
 
   // ---------- 4th column content ----------
   // These fields may have been typed on EITHER survey (initial or final),
@@ -212,15 +241,33 @@ export default function ReportPage() {
     conditionRows.length > 0 ||
     vesselRows.length > 0 ||
     cargoHolds.length > 0 ||
+    showCargoOnBoardOnly ||
     showCargoComparison ||
     showLoadingResult;
 
-  const diffLabel = cargoDiff == null ? null : cargoDiff < 0 ? "Shortage" : cargoDiff > 0 ? "Excess" : "Difference";
-  const diffClass = cargoDiff == null ? "" : cargoDiff < 0 ? "shortage" : cargoDiff > 0 ? "excess" : "";
+  // Shared Excess/Shortage labeling - whichever side is bigger wins the
+  // label, reused for both the discharge comparison and the loading one.
+  const diffLabelFor = (d) => (d == null ? null : d < 0 ? "Shortage" : d > 0 ? "Excess" : "Difference");
+  const diffClassFor = (d) => (d == null ? "" : d < 0 ? "shortage" : d > 0 ? "excess" : "");
 
+  const diffLabel = diffLabelFor(cargoDiff);
+  const diffClass = diffClassFor(cargoDiff);
+  const loadingDiffLabel = diffLabelFor(loadingDiff);
+  const loadingDiffClass = diffClassFor(loadingDiff);
+  const onBoardDiffLabel =
+    onBoardDiff == null ? null : onBoardDiff < 0 ? "Cargo Short" : onBoardDiff > 0 ? "Excess Cargo on Board" : "No Discrepancy";
+  const onBoardDiffClass = diffClassFor(onBoardDiff);
+
+  // Prefer a frozen survey-completion date (set once, on first save) over
+  // the live "updatedAt" timestamp, which changes on every later edit and
+  // would otherwise make the printed survey date drift forward each time
+  // the surveyor comes back to fix a figure. Falls back gracefully for
+  // older records that predate this field.
   const surveyWindow = (s) =>
     s
-      ? `${fmtDate(s.updatedAt)}${s.startTime ? `, ${s.startTime}–${s.endTime || "…"}` : ""}`
+      ? `${fmtDate(s.surveyDate ?? s.completedAt ?? s.createdAt ?? s.updatedAt)}${
+          s.startTime ? `, ${s.startTime}–${s.endTime || "…"}` : ""
+        }`
       : "Not yet recorded";
 
   return (
@@ -394,6 +441,23 @@ export default function ReportPage() {
                 </section>
               )}
 
+              {showCargoOnBoardOnly && (
+                <section className="rpt-block rpt-block--cargo">
+                  <h4>Cargo on Board</h4>
+                  <SideRow label="Draft Survey" value={fmt(cargoOnBoardComputed, dp)} unit="t" />
+                  {manifested != null && <SideRow label="Manifest" value={fmt(manifested, dp)} unit="t" />}
+                  {onBoardDiff != null && (
+                    <div className={`rpt-diff ${onBoardDiffClass}`}>
+                      <span>{onBoardDiff === 0 ? "No discrepancy" : onBoardDiffLabel}</span>
+                      <strong>{fmt(Math.abs(onBoardDiff), dp)} t</strong>
+                    </div>
+                  )}
+                  <p style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 6, fontStyle: "italic" }}>
+                    Not yet discharged — awaiting Final survey.
+                  </p>
+                </section>
+              )}
+
               {showCargoComparison && (
                 <section className="rpt-block rpt-block--cargo">
                   <h4>Cargo Discharged</h4>
@@ -419,6 +483,12 @@ export default function ReportPage() {
                   <SideRow label="Cargo on Board" value={fmt(fv.cargoOnBoard, dp)} unit="t" />
                   {manifested != null && <SideRow label="Manifest" value={fmt(manifested, dp)} unit="t" />}
                   <SideRow label="Loaded" value={fmt(fv.cargoLoaded, dp)} unit="t" emphasis />
+                  {loadingDiff != null && (
+                    <div className={`rpt-diff ${loadingDiffClass}`}>
+                      <span>{loadingDiff === 0 ? "No discrepancy" : loadingDiffLabel}</span>
+                      <strong>{fmt(Math.abs(loadingDiff), dp)} t</strong>
+                    </div>
+                  )}
                 </section>
               )}
             </aside>
