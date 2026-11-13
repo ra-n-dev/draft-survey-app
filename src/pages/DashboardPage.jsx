@@ -57,6 +57,13 @@ export default function DashboardPage() {
           dwt: vesselProfile.dwt ?? null,
         };
         if (vesselProfile.lightship != null) s.lightship = vesselProfile.lightship;
+        // Same ship, same hydrostatic table: reuse its LCF reference.
+        s.hydrostatic = {
+          ...s.hydrostatic,
+          lcfReference: vesselProfile.lcfReference || "midships",
+          draftBasis: vesselProfile.draftBasis || "extreme",
+          keelThickness: vesselProfile.keelThickness ?? null,
+        };
       }
     } else {
       // Final survey: copy identity + geometry EXACTLY from the specific
@@ -84,6 +91,14 @@ export default function DashboardPage() {
         s.voyageNo = linked.voyageNo;
         s.port = linked.port;
         s.vessel = { ...linked.vessel };
+        // The linked survey used the same hydrostatic table, so its LCF
+        // reference applies here too.
+        s.hydrostatic = {
+          ...s.hydrostatic,
+          lcfReference: linked.hydrostatic?.lcfReference || "midships",
+          draftBasis: linked.hydrostatic?.draftBasis || "extreme",
+          keelThickness: linked.hydrostatic?.keelThickness ?? null,
+        };
         s.clientCompany = linked.clientCompany;
         s.clientContact = linked.clientContact;
         s.clientLogoDataUrl = linked.clientLogoDataUrl;

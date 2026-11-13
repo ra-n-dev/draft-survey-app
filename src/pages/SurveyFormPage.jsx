@@ -47,6 +47,21 @@ export default function SurveyFormPage() {
     setStepIndex(0);
   }, [id]);
 
+  // Freeze the survey date the first time a survey is opened. `updatedAt`
+  // changes on every save, so the report can't use it as the survey date
+  // without it drifting forward each time something is edited. `surveyDate`
+  // is set once here and then only changes if the surveyor edits it
+  // themselves in the first step.
+  useEffect(() => {
+    if (survey && !survey.surveyDate) {
+      setSurvey((prev) =>
+        prev && !prev.surveyDate
+          ? { ...prev, surveyDate: prev.createdAt ?? prev.updatedAt ?? Date.now() }
+          : prev
+      );
+    }
+  }, [survey]);
+
   const patch = useCallback((path, value) => {
     setSurvey((prev) => {
       const next = structuredClone(prev);
@@ -128,6 +143,11 @@ export default function SurveyFormPage() {
       nrt: survey.vessel.nrt,
       dwt: survey.vessel.dwt,
       lightship: survey.lightship,
+      // Remembered per vessel: the hydrostatic table's LCF reference is a
+      // fixed property of the ship's table, so new surveys start with it.
+      lcfReference: survey.hydrostatic?.lcfReference || "midships",
+      draftBasis: survey.hydrostatic?.draftBasis || "extreme",
+      keelThickness: survey.hydrostatic?.keelThickness ?? null,
     });
     nav(`/report/${survey.id}`);
   };
@@ -165,6 +185,16 @@ export default function SurveyFormPage() {
                 value={survey.commodity || ""}
                 onChange={(e) => patch("commodity", e.target.value)}
                 placeholder="e.g. Bagged Cement"
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Survey date</span>
+              <input
+                type="date"
+                value={survey.surveyDate ? new Date(survey.surveyDate).toISOString().slice(0, 10) : ""}
+                onChange={(e) =>
+                  patch("surveyDate", e.target.value ? new Date(`${e.target.value}T12:00:00`).getTime() : null)
+                }
               />
             </label>
             <label className="field">
@@ -290,7 +320,7 @@ export default function SurveyFormPage() {
       key: "drafts",
       title: "1. Draft Readings",
       subtitle: "Forward, Midship, Aft — Port & Starboard",
-      missing: missingIn(["drafts."]),
+      missing: missingIn(["drafts.", "hydrostatic.keelThickness"]),
       content: (
         <>
           <p className="muted small">Conditions at the time of reading — your own observation, affects reading accuracy.</p>
@@ -340,6 +370,42 @@ export default function SurveyFormPage() {
             <ResultRow label="Midship Mean Draft" value={v.midMean} decimals={dp} />
             <ResultRow label="Aft Mean Draft" value={v.aftMean} decimals={dp} />
           </div>
+
+          <h3 className="step-subheading">Keel Plate (optional)</h3>
+          <p className="muted small" style={{ marginTop: "-0.4rem" }}>
+            Draft marks show the extreme draft, to the bottom of the keel plate. If you enter the hydrostatic
+            table by the moulded draft (column T), the keel thickness is taken off the quarter mean behind the
+            scenes. Your readings above are never changed.
+          </p>
+          <div className="grid-2">
+            <NumberField
+              label="Keel plate thickness"
+              decimals={dp}
+              value={survey.hydrostatic.keelThickness}
+              onChange={(x) => patch("hydrostatic.keelThickness", x)}
+              suffix="m"
+              allowNegative={false}
+              required={(survey.hydrostatic.draftBasis || "extreme") === "moulded"}
+              hint="In metres: 25 mm = 0.025. Read it off the table: TK minus T."
+            />
+            <label className="field">
+              <span className="field-label">I will enter the hydrostatic table by</span>
+              <select
+                value={survey.hydrostatic.draftBasis || "extreme"}
+                onChange={(e) => patch("hydrostatic.draftBasis", e.target.value)}
+              >
+                <option value="extreme">TK: extreme draft as read (no keel subtraction)</option>
+                <option value="moulded">T: moulded draft (subtract keel thickness)</option>
+              </select>
+            </label>
+          </div>
+          {(survey.hydrostatic.draftBasis || "extreme") === "moulded" && v.keelCorr > 0 && (
+            <div className="results-block">
+              <ResultRow label="Quarter Mean as read (QM2)" value={v.qm2} decimals={dp} unit="m" />
+              <ResultRow label="Keel deducted" value={v.keelCorr} decimals={dp} unit="m" />
+              <ResultRow label="QM2 to enter the table (T column)" value={v.qm2Table} decimals={dp} unit="m" highlight />
+            </div>
+          )}
         </>
       ),
     },
@@ -387,7 +453,18 @@ export default function SurveyFormPage() {
             <ResultRow label="True Midship Draft" value={v.trueMid} decimals={dp} highlight />
             <ResultRow label="True Aft Draft" value={v.trueAft} decimals={dp} highlight />
             <ResultRow label="True Trim" value={v.trueTrim} decimals={dp} highlight />
-            <ResultRow label="Quarter Mean (QM2 — calculated)" value={v.qm2} decimals={dp} highlight />
+            <ResultRow
+              label={v.keelCorr > 0 ? "Quarter Mean (QM2 — as read)" : "Quarter Mean (QM2 — calculated)"}
+              value={v.qm2}
+              decimals={dp}
+              highlight
+            />
+            {v.keelCorr > 0 && (
+              <>
+                <ResultRow label="Keel plate thickness deducted" value={v.keelCorr} decimals={dp} unit="m" />
+                <ResultRow label="QM2 to enter the hydrostatic table (T column)" value={v.qm2Table} decimals={dp} unit="m" highlight />
+              </>
+            )}
           </div>
         </>
       ),
@@ -399,6 +476,125 @@ export default function SurveyFormPage() {
       missing: missingIn(["hydrostatic.qm1.", "hydrostatic.qm3."]),
       content: (
         <>
+          <div
+            style={{
+              background: "#f1f7f8",
+              border: "1px solid #cfe3e6",
+              borderLeft: "4px solid #1f7a8c",
+              borderRadius: 8,
+              padding: "0.85rem 1rem",
+              marginBottom: "1rem",
+              fontSize: "0.86rem",
+              lineHeight: 1.5,
+              color: "#1e3a4c",
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: "0.95rem", marginBottom: "0.5rem", color: "#14304f" }}>
+              Which table column do I read?
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "0.6rem" }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "#14304f" }}>
+                  <th style={{ padding: "4px 8px 4px 0", borderBottom: "1px solid #cfe3e6" }}>Draft you enter the table with</th>
+                  <th style={{ padding: "4px 8px", borderBottom: "1px solid #cfe3e6" }}>Column</th>
+                  <th style={{ padding: "4px 0 4px 8px", borderBottom: "1px solid #cfe3e6" }}>Keel plate</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ padding: "5px 8px 5px 0" }}>As read from the hull marks (extreme draft)</td>
+                  <td style={{ padding: "5px 8px" }}><strong>TK</strong> (m)</td>
+                  <td style={{ padding: "5px 0 5px 8px" }}>Not subtracted</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: "5px 8px 5px 0" }}>Moulded draft (keel thickness taken off)</td>
+                  <td style={{ padding: "5px 8px" }}><strong>T</strong> (m)</td>
+                  <td style={{ padding: "5px 0 5px 8px" }}>Subtracted</td>
+                </tr>
+              </tbody>
+            </table>
+            <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+              <li>
+                <strong>TK = T + keel plate thickness.</strong> Read the thickness off your table: in each row
+                subtract T from TK (for example 12.625 − 12.600 = 0.025 m).
+              </li>
+              <li>
+                Both routes reach the <strong>same row</strong> and the same displacement. Take Displacement,
+                TPC and LCF from the row you matched, in the same table.
+              </li>
+              <li>
+                Never mix them. Entering an extreme draft in the <strong>T</strong> column overstates the
+                displacement by about TPC × 100 × keel thickness (roughly 160 t on a 25 mm keel at TPC 65).
+              </li>
+              <li>
+                If the table has both <strong>DISP</strong> and <strong>DISPM</strong> columns, DISPM is the moulded
+                displacement and normally pairs with the moulded draft (T), while DISP pairs with the extreme
+                draft (TK). Check the table's notes if unsure.
+              </li>
+              <li>
+                Your raw draft readings are never changed. The keel is deducted only from the quarter mean used
+                for the table lookups, including the MTC ±0.5 lookups. Trim and the perpendicular corrections are
+                not affected.
+              </li>
+            </ul>
+          </div>
+
+          <div
+            style={{
+              background: (survey.hydrostatic.draftBasis || "extreme") === "moulded" ? "#fff7e6" : "#eaf6ee",
+              border: "1px solid #d9c79a",
+              borderRadius: 8,
+              padding: "0.7rem 1rem",
+              marginBottom: "1rem",
+              fontSize: "0.9rem",
+              color: "#14304f",
+            }}
+          >
+            {(survey.hydrostatic.draftBasis || "extreme") === "moulded" ? (
+              <>
+                <strong>Read the T column (moulded draft).</strong> Keel plate thickness of{" "}
+                {survey.hydrostatic.keelThickness ?? "—"} m is deducted from your quarter mean
+                {v.qm2Table != null && v.qm2 != null && (
+                  <>
+                    {" "}
+                    ({round(v.qm2, dp)} → <strong>{round(v.qm2Table, dp)}</strong>)
+                  </>
+                )}
+                . Look up QM2 {v.qm2Table != null ? <strong>{round(v.qm2Table, dp)}</strong> : ""} in the T column,
+                and the MTC lookups at ±0.5 from it.
+              </>
+            ) : (
+              <>
+                <strong>Read the TK column (extreme draft).</strong> No keel subtraction: look up QM2{" "}
+                {v.qm2 != null ? <strong>{round(v.qm2, dp)}</strong> : ""} in the TK column.
+              </>
+            )}{" "}
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => setStepIndex(Math.max(0, steps.findIndex((s) => s.key === "drafts")))}
+            >
+              Change keel setting (Step 1)
+            </button>
+          </div>
+
+          <label className="field" style={{ marginBottom: "1rem" }}>
+            <span className="field-label">LCF in this table is measured from</span>
+            <select
+              value={survey.hydrostatic.lcfReference || "midships"}
+              onChange={(e) => patch("hydrostatic.lcfReference", e.target.value)}
+            >
+              <option value="midships">Midships, aft is positive (use as entered)</option>
+              <option value="midships_fwd">Midships, forward is positive</option>
+              <option value="ap">Aft Perpendicular (AP)</option>
+              <option value="fp">Forward Perpendicular (FP)</option>
+            </select>
+            <span className="muted small">
+              Check the table's heading or footnote. If LCF is about half of LBP or more (for example 84
+              m on a 177 m ship), it is measured from the AP or FP and must not be used directly. It is
+              converted to a distance from midships for the 1st trim correction.
+            </span>
+          </label>
           <div className="grid-2">
             <fieldset className="fieldset">
               <legend>QM1 (lower bracket, from table)</legend>
@@ -416,9 +612,16 @@ export default function SurveyFormPage() {
             </fieldset>
           </div>
           <div className="results-block">
+            {v.keelCorr > 0 && (
+              <>
+                <ResultRow label="Keel plate thickness deducted" value={v.keelCorr} decimals={dp} unit="m" />
+                <ResultRow label="QM2 used to enter the table (T column)" value={v.qm2Table} decimals={dp} unit="m" highlight />
+              </>
+            )}
             <ResultRow label="QM2 Displacement (interpolated)" value={v.qm2Disp} decimals={dp} unit="t" highlight />
             <ResultRow label="QM2 TPC (interpolated)" value={v.qm2Tpc} decimals={dp} unit="" highlight />
-            <ResultRow label="QM2 LCF (interpolated)" value={v.qm2Lcf} decimals={dp} highlight />
+            <ResultRow label="QM2 LCF (interpolated, as in table)" value={v.qm2Lcf} decimals={dp} highlight />
+            <ResultRow label="QM2 LCF aft of midships (used in 1st trim correction)" value={v.qm2LcfAft} decimals={dp} highlight />
           </div>
         </>
       ),

@@ -83,6 +83,9 @@ export default function ReportPage() {
   const iv = initialSurvey ? computeForCondition(initialSurvey, null, dp).values : null;
   const fv = finalSurvey ? computeForCondition(finalSurvey, initialSurvey, dp).values : null;
 
+  // Only show the keel rows when a keel thickness was actually deducted.
+  const keelUsed = [iv, fv].some((x) => x && x.keelCorr > 0);
+
   const initialCondition = initialSurvey
     ? initialSurvey.condition ?? "empty"
     : finalSurvey?.condition === "empty"
@@ -360,7 +363,10 @@ export default function ReportPage() {
 
                 {section("Hydrostatic Values (at QM2)")}
                 {R("TPC", "qm2Tpc", "qm2Tpc", "")}
-                {R("LCF", "qm2Lcf", "qm2Lcf", "m")}
+                {keelUsed && R("Keel plate thickness deducted", "keelCorr", "keelCorr", "m")}
+                {keelUsed && R("QM2 used to enter table (moulded)", "qm2Table", "qm2Table", "m", { highlight: true })}
+                {R("LCF (from table)", "qm2Lcf", "qm2Lcf", "m")}
+                {R("LCF aft of midships (used)", "qm2LcfAft", "qm2LcfAft", "m")}
                 {RD("LBP", "vessel.lbp")}
                 {R("MTC (+0.5)", "qm2MtcPlus", "qm2MtcPlus", "")}
                 {R("MTC (−0.5)", "qm2MtcMinus", "qm2MtcMinus", "")}

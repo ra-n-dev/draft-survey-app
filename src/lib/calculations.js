@@ -115,14 +115,34 @@ export function computeSurvey(d, dp = 3) {
   const qm3Tpc = need(g(h.qm3, "tpc"), "hydrostatic.qm3.tpc", missing, "QM3 TPC (table)");
   const qm3Lcf = need(g(h.qm3, "lcf"), "hydrostatic.qm3.lcf", missing, "QM3 LCF (table)");
 
-  v.qm2Disp = interpolate(qm1, v.qm2, qm3, qm1Disp, qm3Disp);
-  v.qm2Lcf = interpolate(qm1, v.qm2, qm3, qm1Lcf, qm3Lcf);
+  // Keel plate thickness. Draft marks read the EXTREME draft (to the bottom
+  // of the keel plate). Many tables are built on the MOULDED draft (to the
+  // top of the keel plate), shown as column T, with the extreme draft in
+  // column TK = T + keel thickness. The surveyor says which column they are
+  // entering the table by:
+  //   "extreme" (default) - table entered by TK / extreme draft: no change
+  //   "moulded"           - table entered by T: keel thickness is deducted
+  // The deduction is applied ONLY to the quarter mean used for the table
+  // lookups (and the MTC +/- 0.5 lookups). The raw readings, the true
+  // drafts and the trim are left exactly as measured - a uniform offset
+  // doesn't change trim or the perpendicular corrections.
+  const draftBasis = h.draftBasis || "extreme";
+  const keelThickness =
+    draftBasis === "moulded"
+      ? need(h.keelThickness, "hydrostatic.keelThickness", missing, "Keel plate thickness (m)")
+      : null;
+  v.keelCorr = draftBasis === "moulded" && isNum(keelThickness) && keelThickness > 0 ? keelThickness : 0;
+  v.qm2Table = isNum(v.qm2) ? v.qm2 - v.keelCorr : null;
+
+  v.qm2Disp = interpolate(qm1, v.qm2Table, qm3, qm1Disp, qm3Disp);
+  v.qm2Lcf = interpolate(qm1, v.qm2Table, qm3, qm1Lcf, qm3Lcf);
   // TPC is typically constant across the bracket / read directly - interpolate too, in case it varies
-  v.qm2Tpc = isNum(qm1Tpc) && isNum(qm3Tpc) ? interpolate(qm1, v.qm2, qm3, qm1Tpc, qm3Tpc) : qm1Tpc ?? qm3Tpc ?? null;
+  v.qm2Tpc = isNum(qm1Tpc) && isNum(qm3Tpc) ? interpolate(qm1, v.qm2Table, qm3, qm1Tpc, qm3Tpc) : qm1Tpc ?? qm3Tpc ?? null;
 
   // ---------- 8. MTC+ / MTC- brackets (special: uses QM2 +/- 0.5 as the lookup value) ----------
-  v.mtcPlusQm = isNum(v.qm2) ? v.qm2 + 0.5 : null;
-  v.mtcMinusQm = isNum(v.qm2) ? v.qm2 - 0.5 : null;
+  // Same table column as the lookup above, so the same keel adjustment.
+  v.mtcPlusQm = isNum(v.qm2Table) ? v.qm2Table + 0.5 : null;
+  v.mtcMinusQm = isNum(v.qm2Table) ? v.qm2Table - 0.5 : null;
 
   const mp = h.mtcPlus || {};
   const mn = h.mtcMinus || {};
@@ -143,9 +163,37 @@ export function computeSurvey(d, dp = 3) {
     isNum(v.qm2MtcPlus) && isNum(v.qm2MtcMinus) ? v.qm2MtcPlus - v.qm2MtcMinus : null;
 
   // ---------- 9. Trim corrections ----------
+  // The 1st trim correction needs the LCF as a distance from MIDSHIPS
+  // (positive = aft of midships, matching trueTrim = aft - fwd, so that
+  // trim by stern + LCF aft = add). Hydrostatic tables publish LCF in
+  // different ways, so the surveyor says which one their table uses:
+  //   "midships"     - table value already positive-aft from midships
+  //                    (used as-is; the original behaviour / default)
+  //   "midships_fwd" - from midships, positive FORWARD (sign is flipped)
+  //   "ap"           - from the Aft Perpendicular:  LBP/2 - LCF
+  //   "fp"           - from the Fwd Perpendicular:  LCF - LBP/2
+  const lcfReference = h.lcfReference || "midships";
+  const halfLbp = isNum(lbp) ? lbp / 2 : null;
+  const toLcfAft = (lcf) => {
+    if (!isNum(lcf)) return null;
+    switch (lcfReference) {
+      case "ap":
+        return isNum(halfLbp) ? halfLbp - lcf : null;
+      case "fp":
+        return isNum(halfLbp) ? lcf - halfLbp : null;
+      case "midships_fwd":
+        return -lcf;
+      default:
+        return lcf;
+    }
+  };
+  // Interpolated table LCF stays available as v.qm2Lcf; this is the
+  // converted figure that actually goes into the correction.
+  v.qm2LcfAft = toLcfAft(v.qm2Lcf);
+
   v.firstTrimCorr =
-    isNum(v.trueTrim) && isNum(v.qm2Tpc) && isNum(v.qm2Lcf) && isNum(lbp) && lbp !== 0
-      ? (v.trueTrim * v.qm2Tpc * v.qm2Lcf * 100) / lbp
+    isNum(v.trueTrim) && isNum(v.qm2Tpc) && isNum(v.qm2LcfAft) && isNum(lbp) && lbp !== 0
+      ? (v.trueTrim * v.qm2Tpc * v.qm2LcfAft * 100) / lbp
       : null;
 
   v.secondTrimCorr =
